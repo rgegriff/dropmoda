@@ -1,0 +1,123 @@
+#!/home/george/.pyenv/versions/venv/envs/dropmoda/bin/python3
+import datetime, os, sys, yaml
+import wmctrl
+import xpybutil
+import xpybutil.event as event
+import xpybutil.ewmh as ewmh
+import xpybutil.motif as motif
+import xpybutil.util as util
+import xpybutil.window as window
+import subprocess
+# Todo: track idles
+# Todo: Put event listener in a separate thread
+# Todo: Refactor window changes
+
+def try_get_wid_by_pid(pid):
+    wids = ewmh.get_client_list().reply()
+    found = []
+    for wid in wids:
+        window_pid = ewmh.get_wm_pid(wid).reply()
+        if window_pid == pid:
+            found.append(wid)
+    return found
+
+class Window():
+    def __init__(self, wid):
+        if type(wid) == int:
+            self.id = wid
+        elif type(wid) == str:
+            self.id = int(wid, 16)
+        self.refresh()
+
+    def refresh(self):
+        properties = {
+            "name": ("_NET_WM_NAME", "str"),
+            "pid": ("_NET_WM_PID", "int[]"),
+            "type": ("_NET_WM_WINDOW_TYPE", "atoms[]"),
+            "wm_class": ("WM_CLASS", "str[]"),
+            "desktop": ("_NET_WM_DESKTOP", "int")
+        }
+        for k, v in properties.items():
+            try:
+                response = util.PropertyCookie(util.get_property(self.id, v[0])).reply()
+                if v[1] == "atoms[]":
+                    response = list(map(util.get_atom_name, response))
+                setattr(self, k, response)
+            except Exception as e: 
+                print(k,v,e)
+                print(subprocess.check_output(["xprop","-id",str(self.id)]))
+
+    @property
+    def id_hex(self):
+        return hex(self.id)
+
+class FocusState():
+    focused_window = None
+    logging_dir = os.path.join(os.environ.get("HOME"), '.config/focustracker/')
+    last_input = None
+
+    def __init__(self, log=True):
+        os.makedirs(self.logging_dir, exist_ok=True)
+        self.logfile_name = os.path.join(self.logging_dir, "log")
+        self.logging_enabled = log
+
+    def log(self, msg):
+        print(msg)
+        if self.logging_enabled:
+            with open(self.logfile_name, "a") as logfile:
+                logfile.write(f"{msg}\n")
+
+    def handle_window_property_changed(self, e):
+        if util.get_atom_name(e.atom) == "_NET_WM_NAME":
+          timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+          active_window_id = ewmh.get_active_window().reply()
+          win = Window(active_window_id)
+          msg = f"[{timestamp}] {'.'.join(win.wm_class):<20} {win.name}"
+          self.log(msg)
+
+    def change_active_window(self, new_active_wid):
+        try:
+            old_window = self.focused_window
+            new_window = Window(new_active_wid)
+            if "_NET_WM_WINDOW_TYPE_NORMAL" not in new_window.type:
+                print(new_window.type)
+                return
+            self.focused_window = new_window
+            if old_window and old_window.id != new_window.id:
+                print("-----")
+                window.listen(new_window.id, 'PropertyChange')
+                event.connect('PropertyNotify', new_window.id, self.handle_window_property_changed)
+                event.disconnect('PropertyNotify', old_window.id)
+            elif not old_window:
+                window.listen(new_window.id, 'PropertyChange')
+                event.connect('PropertyNotify', new_window.id, self.handle_window_property_changed)
+        except Exception as e:
+            raise e
+
+    def handle_windowchanged(self, e):
+      try:
+        if util.get_atom_name(e.atom) == '_NET_ACTIVE_WINDOW':
+          # Do something whenever the active window changes
+          active_window_id = ewmh.get_active_window().reply()
+          if active_window_id == 0:
+              return
+          self.change_active_window(active_window_id)
+          
+          timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+          msg = f"[{timestamp}] {'.'.join(self.focused_window.wm_class):<20} {self.focused_window.name}"
+          self.log(msg)
+      except Exception as e:
+          print("handler failed:", e)
+
+#event.connect('ConfigureNotify', xpybutil.root, handle_configurechanged)
+
+if __name__ == "__main__":
+  state = FocusState(log=True)
+  window.listen(xpybutil.root, "PropertyChange")
+  event.connect('PropertyNotify', xpybutil.root, state.handle_windowchanged)
+  while True:
+    try:
+      event.main()
+    except Exception as e:
+        print("unhandled exception:", e)
+        continue

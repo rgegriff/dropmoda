@@ -1,0 +1,18 @@
+#!/home/george/.pyenv/versions/venv/envs/dropmoda/bin/python3
+import os, sys, yaml
+import wmctrl
+
+_HOME = os.environ.get("HOME", "~")
+DEFAULT_CONFIG_FILENAME = os.path.join(_HOME, ".config/dropmoda/config.yml")
+
+def parse_config():
+    with open(DEFAULT_CONFIG_FILENAME, "r") as config_file:
+        try:
+            config = yaml.safe_load(config_file)
+        except yaml.YAMLError as e:
+            raise e
+        return config
+
+if __name__ == "__main__":
+    config = parse_config()
+    print(config)
