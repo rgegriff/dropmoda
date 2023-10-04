@@ -8,10 +8,9 @@ from xpybutil.event import main as event_loop
 from xpybutil.util import get_atom_name
 from utils import Window, get_active_window
 
-# Todo: track idles
+# Todo: track idles (Mouse/KB events?)
 # Todo: Put event listener in a separate thread
-# Todo: Refactor window changes
-
+# Todo: Don't log a new log if the class/title doesn't change; don't write new log line if nothing except the timestamp changed
 
 class FocusState():
     _focused_window = None
